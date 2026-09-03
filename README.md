@@ -1,24 +1,28 @@
 # Marceneiro Scheduler
 
-Criar um diagrama de gantt, onde o nome dos colaboradores fica nas linhas e a linha do tempo nas colunas, e com a opção de inverter essas posições. Vai ser para uma marcenaria
+Diagrama de Gantt para uma marcenaria: o nome dos colaboradores fica nas linhas e a linha do
+tempo nas colunas, com a opção de inverter essas posições.
 
-This project was built with [Lovable](https://lovable.dev).
+## Stack
 
-## Build with Lovable
+- [TanStack Start](https://tanstack.com/start) (React + SSR) e [TanStack Router](https://tanstack.com/router)
+- [Supabase](https://supabase.com) — Postgres com Row Level Security, autenticação e tempo real
+- Vite + Nitro (preset Vercel)
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/4c55fdb8-c1eb-4f29-a6f6-9bbfc8f71ffb).
+## Desenvolvimento
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Requer [Bun](https://bun.sh).
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun install
+bun run dev
+```
+
+Crie um `.env.local` (veja `.env.example`) com as variáveis do seu projeto Supabase antes de
+rodar. O SQL de criação do schema está em `supabase/migration.sql`.
+
+## Build
+
+```sh
+bun run build
 ```
