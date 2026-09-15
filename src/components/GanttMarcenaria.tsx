@@ -30,8 +30,8 @@ import { MontadorPainel } from "@/components/MontadorPainel";
 import {
   ausenteEm,
   corContraste,
+  coresFasesEfetivas,
   detectarConflitos,
-  faseClass,
   faseLabel,
   gerarDias,
   nomeFuncao,
@@ -91,7 +91,13 @@ export function GanttMarcenaria() {
     ausencias,
     prazos,
     usuarioLogado,
+    configuracoesSistema,
   } = useGantt();
+
+  const coresFases = useMemo(
+    () => coresFasesEfetivas(configuracoesSistema.coresFases, usuarioLogado?.coresFases),
+    [configuracoesSistema.coresFases, usuarioLogado?.coresFases],
+  );
 
   // O cargo "Usuário" só acompanha a agenda — nunca cria, edita ou exclui nada por aqui.
   const somenteLeitura = usuarioLogado?.papel === "usuario";
@@ -561,9 +567,12 @@ export function GanttMarcenaria() {
                 ? { gridRow: ci + 2, gridColumn: `${inicio + 2} / span ${span}` }
                 : { gridRow: `${inicio + 2} / span ${span}`, gridColumn: ci + 2 };
               const motivosConflito = conflitos.get(t.id);
-              const estiloCor = t.cor
-                ? { ...pos, backgroundColor: t.cor, color: corContraste(t.cor) }
-                : pos;
+              const corResolvida = t.cor || coresFases[t.fase];
+              const estiloCor = {
+                ...pos,
+                backgroundColor: corResolvida,
+                color: corContraste(corResolvida),
+              };
 
               return (
                 <Tooltip key={t.id}>
@@ -584,9 +593,9 @@ export function GanttMarcenaria() {
                         somenteLeitura
                           ? "cursor-default"
                           : "cursor-pointer transition-transform hover:scale-[1.02]"
-                      } ${t.cor ? "" : `text-phase-fg ${faseClass[t.fase]}`} ${
-                        colabPorLinha ? "" : "items-start pt-1"
-                      } ${motivosConflito ? "ring-2 ring-destructive ring-offset-1" : ""}`}
+                      } ${colabPorLinha ? "" : "items-start pt-1"} ${
+                        motivosConflito ? "ring-2 ring-destructive ring-offset-1" : ""
+                      }`}
                     >
                       {motivosConflito && (
                         <AlertTriangle className="size-3 shrink-0 text-destructive-foreground" />
@@ -620,7 +629,7 @@ export function GanttMarcenaria() {
       <div className="flex flex-wrap items-center gap-3">
         {(Object.keys(faseLabel) as Fase[]).map((f) => (
           <Badge key={f} variant="outline" className="gap-2 font-normal">
-            <span className={`size-3 rounded-sm ${faseClass[f]}`} />
+            <span className="size-3 rounded-sm" style={{ backgroundColor: coresFases[f] }} />
             {faseLabel[f]}
           </Badge>
         ))}

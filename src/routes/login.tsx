@@ -5,7 +5,25 @@ import { Eye, EyeOff, Hammer, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { emailDoCpf, somenteDigitos } from "@/lib/gantt-data";
 import { GanttProvider, useGantt } from "@/lib/gantt-store";
+
+/**
+ * Aceita tanto e-mail quanto CPF no mesmo campo: se o texto digitado não tiver "@" e, só com
+ * dígitos, tiver 11 caracteres, tratamos como CPF e transformamos no "e-mail" interno de login
+ * (veja `emailDoCpf`) antes de mandar para o Supabase Auth. Caso contrário, envia como digitado.
+ * `ehCpf` informa se o identificador foi reconhecido como CPF, para também "limpar" a senha
+ * digitada (a senha de uma conta de CPF é sempre só os dígitos — com ou sem pontuação deve
+ * funcionar igual no campo de senha).
+ */
+function identificadorDeLogin(valor: string): { email: string; ehCpf: boolean } {
+  const bruto = valor.trim();
+  if (bruto.includes("@")) return { email: bruto, ehCpf: false };
+  const digitos = somenteDigitos(bruto);
+  return digitos.length === 11
+    ? { email: emailDoCpf(digitos), ehCpf: true }
+    : { email: bruto, ehCpf: false };
+}
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -40,10 +58,12 @@ function LoginPage() {
     e.preventDefault();
     setEntrando(true);
     setErro("");
-    const mensagemErro = await login(email, senha);
+    const { email: emailFinal, ehCpf } = identificadorDeLogin(email);
+    const senhaFinal = ehCpf ? somenteDigitos(senha) : senha;
+    const mensagemErro = await login(emailFinal, senhaFinal);
     setEntrando(false);
     if (mensagemErro) {
-      setErro("E-mail ou senha incorretos.");
+      setErro("E-mail/CPF ou senha incorretos.");
       return;
     }
     void navigate({ to: "/", replace: true });
@@ -70,19 +90,24 @@ function LoginPage() {
 
         <form onSubmit={entrar} className="space-y-4 rounded-lg border border-border bg-card p-5">
           <div className="space-y-1.5">
-            <Label htmlFor="login-email">E-mail</Label>
+            <Label htmlFor="login-email">E-mail ou CPF</Label>
             <Input
               id="login-email"
-              type="email"
+              type="text"
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="voce@exemplo.com"
+              placeholder="voce@exemplo.com ou 000.000.000-00"
               autoComplete="username"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="login-senha">Senha</Label>
+            <Label htmlFor="login-senha">
+              Senha{" "}
+              <span className="font-normal text-muted-foreground">
+                (funcionário: o CPF, com ou sem pontuação)
+              </span>
+            </Label>
             <div className="relative">
               <Input
                 id="login-senha"

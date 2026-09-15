@@ -5,7 +5,7 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { Cliente } from "@/lib/gantt-data";
+import { estatisticasCliente, type Cliente } from "@/lib/gantt-data";
 import { useGantt } from "@/lib/gantt-store";
 import { useDesfazerToast } from "@/lib/undo-toast";
 
@@ -119,13 +119,18 @@ export function SecaoClientes() {
 
       <ul className="divide-y divide-border rounded-lg border border-border bg-card">
         {clientes.map((c) => {
-          const qtdServicos = tarefas.filter((t) => t.cliente === c.nome).length;
+          const { servicos: qtdServicos, pedidos: qtdPedidos } = estatisticasCliente(
+            tarefas,
+            c.nome,
+          );
           return (
             <li key={c.id} className="flex items-center gap-2 p-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{c.nome}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   {[c.telefone, c.endereco].filter(Boolean).join(" · ") || "Sem contato cadastrado"}
+                  {" · "}
+                  {qtdPedidos} {qtdPedidos === 1 ? "pedido" : "pedidos"}
                   {" · "}
                   {qtdServicos} {qtdServicos === 1 ? "serviço" : "serviços"}
                 </p>

@@ -4,7 +4,7 @@ import { AlertTriangle, ChevronDown, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  faseClass,
+  coresFasesEfetivas,
   faseLabel,
   nomeFuncao,
   type Colaborador,
@@ -13,6 +13,7 @@ import {
   type FuncaoDef,
   type Tarefa,
 } from "@/lib/gantt-data";
+import { useGantt } from "@/lib/gantt-store";
 
 type Props = {
   colaborador: Colaborador;
@@ -25,6 +26,8 @@ type Props = {
 export function MontadorPainel({ colaborador, tarefas, dias, funcoes, conflitos }: Props) {
   const [abertos, setAbertos] = useState<string[]>([]);
   const [todos, setTodos] = useState(false);
+  const { configuracoesSistema, usuarioLogado } = useGantt();
+  const coresFases = coresFasesEfetivas(configuracoesSistema.coresFases, usuarioLogado?.coresFases);
 
   const alternar = (id: string) =>
     setAbertos((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
@@ -67,6 +70,7 @@ export function MontadorPainel({ colaborador, tarefas, dias, funcoes, conflitos 
       <ul className="divide-y divide-border">
         {ordenadas.map((t) => {
           const motivosConflito = conflitos?.get(t.id);
+          const corResolvida = t.cor || coresFases[t.fase];
           return (
             <li key={t.id} className="py-3">
               <button
@@ -75,7 +79,10 @@ export function MontadorPainel({ colaborador, tarefas, dias, funcoes, conflitos 
                 className="flex w-full items-center gap-2 text-left"
                 aria-expanded={detalhado(t.id)}
               >
-                <span className={`size-3 shrink-0 rounded-sm ${faseClass[t.fase]}`} />
+                <span
+                  className="size-3 shrink-0 rounded-sm"
+                  style={{ backgroundColor: corResolvida }}
+                />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5 truncate text-sm font-semibold">
                     {t.obra}
@@ -104,7 +111,10 @@ export function MontadorPainel({ colaborador, tarefas, dias, funcoes, conflitos 
                     <dt className="uppercase tracking-wide text-muted-foreground">Etapa</dt>
                     <dd>
                       <Badge variant="outline" className="gap-2 font-normal">
-                        <span className={`size-2.5 rounded-sm ${faseClass[t.fase]}`} />
+                        <span
+                          className="size-2.5 rounded-sm"
+                          style={{ backgroundColor: corResolvida }}
+                        />
                         {faseLabel[t.fase]}
                       </Badge>
                     </dd>

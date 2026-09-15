@@ -9,6 +9,7 @@ import {
   type Cliente,
   type Colaborador,
   type ConfiguracoesSistema,
+  type CoresTema,
   type EtapaModelo,
   type Fase,
   type FuncaoDef,
@@ -20,7 +21,12 @@ import {
   type Usuario,
 } from "./gantt-data";
 import { supabase } from "./supabase-client";
-import { atualizarUsuarioSv, criarUsuarioSv, removerUsuarioSv } from "./usuarios.server";
+import {
+  alternarStatusUsuarioSv,
+  atualizarUsuarioSv,
+  criarUsuarioSv,
+  removerUsuarioSv,
+} from "./usuarios.server";
 
 // =============================================================================
 // Estado — agora é um cache local dos dados que vivem no Supabase. É povoado por
@@ -50,6 +56,8 @@ export type NovoUsuarioParams = {
   id?: string | undefined;
   nome: string;
   email?: string | undefined;
+  /** Troca o e-mail/login de uma conta já existente (edição); ignorado ao criar. */
+  novoEmail?: string | undefined;
   senha?: string | undefined;
   papel: Papel;
   colaboradorId?: string | undefined;
@@ -57,7 +65,7 @@ export type NovoUsuarioParams = {
 };
 
 type Store = State & {
-  salvarColaborador: (c: Omit<Colaborador, "id"> & { id?: string | undefined }) => Promise<void>;
+  salvarColaborador: (c: Omit<Colaborador, "id"> & { id?: string | undefined }) => Promise<string>;
   removerColaborador: (id: string) => Promise<void>;
   salvarTarefa: (t: Omit<Tarefa, "id"> & { id?: string | undefined }) => Promise<void>;
   removerTarefa: (id: string) => Promise<void>;
@@ -83,10 +91,13 @@ type Store = State & {
   logout: () => Promise<void>;
   salvarUsuario: (u: NovoUsuarioParams) => Promise<void>;
   removerUsuario: (id: string) => Promise<void>;
+  alternarStatusUsuario: (id: string, ativo: boolean) => Promise<void>;
   atualizarNomeProprio: (nome: string) => Promise<void>;
   atualizarSenhaPropria: (novaSenha: string) => Promise<void>;
   definirTema: (tema: Tema) => void;
   atualizarConfiguracoesSistema: (c: Partial<ConfiguracoesSistema>) => Promise<void>;
+  atualizarMinhasCoresFases: (cores: Partial<Record<Fase, string>>) => Promise<void>;
+  atualizarMinhasCoresTema: (cores: CoresTema) => Promise<void>;
   exportarBackup: () => string;
 };
 
@@ -159,11 +170,17 @@ const getSnapshot = () => snapshot;
 // Conversão entre as colunas do Supabase (snake_case) e os tipos do app (camelCase)
 // =============================================================================
 
-type ColaboradorRow = { id: string; nome: string; funcao_id: string | null };
+type ColaboradorRow = {
+  id: string;
+  nome: string;
+  funcao_id: string | null;
+  cpf: string | null;
+};
 const paraColaborador = (r: ColaboradorRow): Colaborador => ({
   id: r.id,
   nome: r.nome,
   funcaoId: r.funcao_id ?? SEM_FUNCAO_ID,
+  ...(r.cpf ? { cpf: r.cpf } : {}),
 });
 
 type FuncaoRow = { id: string; nome: string };
@@ -238,6 +255,9 @@ type ProfileRow = {
   papel: Papel;
   colaborador_id: string | null;
   ver_todos_na_agenda: boolean;
+  ativo: boolean;
+  cores_fases: Partial<Record<Fase, string>> | null;
+  cores_tema: CoresTema | null;
 };
 const paraUsuario = (r: ProfileRow): Usuario => ({
   id: r.id,
@@ -246,10 +266,16 @@ const paraUsuario = (r: ProfileRow): Usuario => ({
   papel: r.papel,
   ...(r.colaborador_id ? { colaboradorId: r.colaborador_id } : {}),
   verTodosNaAgenda: r.ver_todos_na_agenda,
+  ativo: r.ativo,
+  ...(r.cores_fases ? { coresFases: r.cores_fases } : {}),
+  ...(r.cores_tema ? { coresTema: r.cores_tema } : {}),
 });
 
-type ConfigRow = { id: number; nome_empresa: string };
-const paraConfig = (r: ConfigRow): ConfiguracoesSistema => ({ nomeEmpresa: r.nome_empresa });
+type ConfigRow = { id: number; nome_empresa: string; cores_fases: Record<Fase, string> };
+const paraConfig = (r: ConfigRow): ConfiguracoesSistema => ({
+  nomeEmpresa: r.nome_empresa,
+  coresFases: r.cores_fases,
+});
 
 // =============================================================================
 // Carregamento inicial + tempo real
@@ -398,10 +424,18 @@ function lancarSeErro(error: { message: string } | null) {
 
 const acoes = {
   salvarColaborador: async (c: Omit<Colaborador, "id"> & { id?: string | undefined }) => {
-    const payload = { nome: c.nome, funcao_id: c.funcaoId || null };
-    if (c.id)
+    const payload = {
+      nome: c.nome,
+      funcao_id: c.funcaoId || null,
+      cpf: c.cpf || null,
+    };
+    if (c.id) {
       lancarSeErro((await supabase.from("colaboradores").update(payload).eq("id", c.id)).error);
-    else lancarSeErro((await supabase.from("colaboradores").insert(payload)).error);
+      return c.id;
+    }
+    const resposta = await supabase.from("colaboradores").insert(payload).select("id").single();
+    lancarSeErro(resposta.error);
+    return (resposta.data as { id: string }).id;
   },
   removerColaborador: async (id: string) => {
     lancarSeErro((await supabase.from("colaboradores").delete().eq("id", id)).error);
@@ -527,6 +561,7 @@ const acoes = {
           ...(u.colaboradorId ? { colaboradorId: u.colaboradorId } : {}),
           verTodosNaAgenda: u.verTodosNaAgenda ?? false,
           ...(u.senha ? { novaSenha: u.senha } : {}),
+          ...(u.novoEmail ? { novoEmail: u.novoEmail } : {}),
         },
       });
       return;
@@ -550,6 +585,11 @@ const acoes = {
     if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
     await removerUsuarioSv({ data: { accessToken, id } });
   },
+  alternarStatusUsuario: async (id: string, ativo: boolean) => {
+    const accessToken = state.sessao?.access_token;
+    if (!accessToken) throw new Error("Sessão expirada. Faça login novamente.");
+    await alternarStatusUsuarioSv({ data: { accessToken, id, ativo } });
+  },
   atualizarNomeProprio: async (nome: string) => {
     const id = state.sessao?.user.id;
     if (!id) throw new Error("Sessão expirada. Faça login novamente.");
@@ -565,13 +605,35 @@ const acoes = {
     setState({ tema });
   },
   atualizarConfiguracoesSistema: async (c: Partial<ConfiguracoesSistema>) => {
-    if (c.nomeEmpresa === undefined) return;
+    const payload: { nome_empresa?: string; cores_fases?: Record<Fase, string> } = {};
+    if (c.nomeEmpresa !== undefined) payload.nome_empresa = c.nomeEmpresa;
+    if (c.coresFases !== undefined) payload.cores_fases = c.coresFases;
+    if (Object.keys(payload).length === 0) return;
+    lancarSeErro((await supabase.from("configuracoes_sistema").update(payload).eq("id", 1)).error);
+  },
+  atualizarMinhasCoresFases: async (cores: Partial<Record<Fase, string>>) => {
+    const id = state.sessao?.user.id;
+    if (!id) throw new Error("Sessão expirada. Faça login novamente.");
+    const semVazias = Object.fromEntries(Object.entries(cores).filter(([, v]) => !!v));
     lancarSeErro(
       (
         await supabase
-          .from("configuracoes_sistema")
-          .update({ nome_empresa: c.nomeEmpresa })
-          .eq("id", 1)
+          .from("profiles")
+          .update({ cores_fases: Object.keys(semVazias).length ? semVazias : null })
+          .eq("id", id)
+      ).error,
+    );
+  },
+  atualizarMinhasCoresTema: async (cores: CoresTema) => {
+    const id = state.sessao?.user.id;
+    if (!id) throw new Error("Sessão expirada. Faça login novamente.");
+    const semVazias = Object.fromEntries(Object.entries(cores).filter(([, v]) => !!v));
+    lancarSeErro(
+      (
+        await supabase
+          .from("profiles")
+          .update({ cores_tema: Object.keys(semVazias).length ? semVazias : null })
+          .eq("id", id)
       ).error,
     );
   },

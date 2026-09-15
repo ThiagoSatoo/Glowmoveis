@@ -2,8 +2,9 @@ import { useMemo } from "react";
 import { AlertTriangle, CalendarOff, Users, Wrench } from "lucide-react";
 
 import {
+  coresFasesEfetivas,
   detectarConflitos,
-  faseClass,
+  estatisticasCliente,
   faseLabel,
   gerarDias,
   nomeFuncao,
@@ -35,7 +36,9 @@ function CartaoEstatistica({
 }
 
 export function SecaoRelatorios() {
-  const { colaboradores, tarefas, funcoes, ausencias } = useGantt();
+  const { colaboradores, tarefas, funcoes, ausencias, configuracoesSistema, usuarioLogado } =
+    useGantt();
+  const coresFases = coresFasesEfetivas(configuracoesSistema.coresFases, usuarioLogado?.coresFases);
 
   const hojeIndex = useMemo(() => {
     const semana = gerarDias(7);
@@ -83,10 +86,10 @@ export function SecaoRelatorios() {
   const maiorContagemFase = Math.max(1, ...Object.values(servicosPorFase));
 
   const principaisClientes = useMemo(() => {
-    const contagem = new Map<string, number>();
-    for (const t of tarefas) contagem.set(t.cliente, (contagem.get(t.cliente) ?? 0) + 1);
-    return Array.from(contagem.entries())
-      .sort((a, b) => b[1] - a[1])
+    const nomes = new Set(tarefas.map((t) => t.cliente));
+    return Array.from(nomes)
+      .map((nome) => ({ nome, ...estatisticasCliente(tarefas, nome) }))
+      .sort((a, b) => b.servicos - a.servicos)
       .slice(0, 5);
   }, [tarefas]);
 
@@ -163,15 +166,19 @@ export function SecaoRelatorios() {
               <li key={f}>
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-2">
-                    <span className={`size-2.5 rounded-sm ${faseClass[f]}`} />
+                    <span
+                      className="size-2.5 rounded-sm"
+                      style={{ backgroundColor: coresFases[f] }}
+                    />
                     {faseLabel[f]}
                   </span>
                   <span className="text-xs text-muted-foreground">{servicosPorFase[f]}</span>
                 </div>
                 <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className={`h-full rounded-full ${faseClass[f]}`}
+                    className="h-full rounded-full"
                     style={{
+                      backgroundColor: coresFases[f],
                       width: `${Math.max(2, (servicosPorFase[f] / maiorContagemFase) * 100)}%`,
                     }}
                   />
@@ -184,11 +191,12 @@ export function SecaoRelatorios() {
         <div className="rounded-lg border border-border bg-card p-4">
           <h3 className="text-lg font-semibold">Principais clientes</h3>
           <ul className="mt-4 divide-y divide-border">
-            {principaisClientes.map(([cliente, qtd]) => (
-              <li key={cliente} className="flex items-center justify-between py-2 text-sm">
-                <span className="min-w-0 truncate">{cliente}</span>
+            {principaisClientes.map(({ nome, servicos, pedidos }) => (
+              <li key={nome} className="flex items-center justify-between py-2 text-sm">
+                <span className="min-w-0 truncate">{nome}</span>
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {qtd} {qtd === 1 ? "serviço" : "serviços"}
+                  {pedidos} {pedidos === 1 ? "pedido" : "pedidos"} · {servicos}{" "}
+                  {servicos === 1 ? "serviço" : "serviços"}
                 </span>
               </li>
             ))}

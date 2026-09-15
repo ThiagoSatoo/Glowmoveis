@@ -13,7 +13,70 @@ export type Colaborador = {
   id: string;
   nome: string;
   funcaoId: string;
+  /** CPF (só dígitos, 11 caracteres) — usado como login/senha da conta de acesso desse funcionário. */
+  cpf?: string | undefined;
 };
+
+/**
+ * Domínio fake usado para transformar um CPF num "e-mail" válido perante o Supabase Auth (que
+ * exige formato de e-mail). Nunca é exibido ao usuário — na UI sempre mostramos o CPF formatado.
+ */
+export const DOMINIO_LOGIN_CPF = "colaborador.cpf.login";
+
+/** Remove tudo que não for dígito (pontos, traço, espaços, etc.). */
+export function somenteDigitos(valor: string): string {
+  return valor.replace(/\D/g, "");
+}
+
+/**
+ * Valida um CPF pelo algoritmo oficial de dígitos verificadores (aceita tanto "12345678900"
+ * quanto "123.456.789-00" — normaliza internamente). Rejeita sequências de dígito repetido
+ * (ex.: "00000000000"), que passariam no cálculo mas não são CPFs válidos.
+ */
+export function cpfValido(cpf: string): boolean {
+  const digitos = somenteDigitos(cpf);
+  if (digitos.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(digitos)) return false;
+
+  const calcularDigito = (base: string, fatorInicial: number): number => {
+    let soma = 0;
+    let fator = fatorInicial;
+    for (const c of base) {
+      soma += Number(c) * fator;
+      fator -= 1;
+    }
+    const resto = soma % 11;
+    return resto < 2 ? 0 : 11 - resto;
+  };
+
+  const primeiroDigito = calcularDigito(digitos.slice(0, 9), 10);
+  const segundoDigito = calcularDigito(digitos.slice(0, 9) + String(primeiroDigito), 11);
+
+  return digitos[9] === String(primeiroDigito) && digitos[10] === String(segundoDigito);
+}
+
+/** Formata 11 dígitos como "000.000.000-00". Retorna a entrada sem alteração se não tiver 11 dígitos. */
+export function formatarCpf(cpf: string): string {
+  const digitos = somenteDigitos(cpf);
+  if (digitos.length !== 11) return cpf;
+  return `${digitos.slice(0, 3)}.${digitos.slice(3, 6)}.${digitos.slice(6, 9)}-${digitos.slice(9)}`;
+}
+
+/** Constrói o "e-mail" fake usado internamente como login/Auth para um CPF (só dígitos). */
+export function emailDoCpf(cpf: string): string {
+  return `${somenteDigitos(cpf)}@${DOMINIO_LOGIN_CPF}`;
+}
+
+/** Indica se um e-mail é, na verdade, um login de CPF gerado por `emailDoCpf`. */
+export function ehEmailDeCpf(email: string): boolean {
+  return email.toLowerCase().endsWith(`@${DOMINIO_LOGIN_CPF}`);
+}
+
+/** Extrai os dígitos do CPF de um e-mail gerado por `emailDoCpf` (ou `undefined` se não for um). */
+export function extrairCpfDoEmail(email: string): string | undefined {
+  if (!ehEmailDeCpf(email)) return undefined;
+  return email.slice(0, email.indexOf("@"));
+}
 
 /** Cadastro de cliente — hoje serve para nome/contato consistentes; os serviços guardam só o nome. */
 export type Cliente = {
@@ -38,6 +101,23 @@ export type Tarefa = {
   /** cor customizada da barra (hex); quando ausente, usa a cor padrão da etapa */
   cor?: string | undefined;
 };
+
+/**
+ * Quantos serviços e quantos pedidos um cliente já fez. Um "serviço" é uma tarefa (uma etapa
+ * do cronograma); um "pedido" é um trabalho — pode reunir várias tarefas/etapas (ex.: um
+ * guarda-roupa criado a partir de um modelo vira 4 tarefas — corte, montagem, acabamento,
+ * entrega — mas conta como 1 pedido só). Como o sistema não tem um cadastro separado de
+ * "pedido", agrupamos pelo nome da obra: tarefas do mesmo cliente com a mesma obra são o
+ * mesmo pedido.
+ */
+export function estatisticasCliente(
+  tarefas: Tarefa[],
+  clienteNome: string,
+): { servicos: number; pedidos: number } {
+  const doCliente = tarefas.filter((t) => t.cliente === clienteNome);
+  const pedidos = new Set(doCliente.map((t) => t.obra));
+  return { servicos: doCliente.length, pedidos: pedidos.size };
+}
 
 /** Ausência/folga de um colaborador (férias, atestado, etc.). */
 export type Ausencia = {
@@ -132,6 +212,25 @@ export type Usuario = {
    * Sem efeito para os cargos "gerente"/"admin", que sempre veem tudo.
    */
   verTodosNaAgenda?: boolean | undefined;
+  /**
+   * Se false, a conta está desativada: perde acesso ao sistema imediatamente (bloqueado tanto no
+   * login/Auth quanto nas políticas de RLS). Contas novas nascem ativas; ausente é tratado como
+   * `true` para não quebrar dados antigos.
+   */
+  ativo?: boolean | undefined;
+  /**
+   * Personalização das cores das etapas só para esta conta (sobrepõe, campo a campo, a cor
+   * padrão do sistema — veja `coresFasesEfetivas`). Ausente/parcial = usa o padrão do sistema
+   * para as etapas não personalizadas.
+   */
+  coresFases?: Partial<Record<Fase, string>> | undefined;
+  /**
+   * Personalização das cores gerais da tela (fundo, texto, destaque etc.) só para esta conta —
+   * veja `CORES_TEMA_TOKENS`/`aplicarPropriedadesCssTema`. Ausente/parcial = usa o visual padrão
+   * do sistema para o que não foi personalizado. Só tem efeito no tema claro: o tema escuro
+   * nunca muda por causa disso.
+   */
+  coresTema?: CoresTema | undefined;
 };
 
 /** Nível de autoridade de cada cargo — quanto maior, mais permissões. */
@@ -158,14 +257,134 @@ export function papeisAtribuiveis(ator: Papel): Papel[] {
   return (Object.keys(nivelPapel) as Papel[]).filter((p) => podeGerenciarPapel(ator, p));
 }
 
+/**
+ * Cor padrão de cada etapa quando ninguém personalizou nada ainda — mesmo visual que o
+ * sistema sempre teve. Só serve de "semente"; a partir daqui, tudo é configurável em
+ * Configurações → Sistema (padrão do sistema) e Configurações → Perfil (por usuário).
+ */
+export const CORES_FASES_PADRAO: Record<Fase, string> = {
+  corte: "#2f6f8f",
+  montagem: "#c98a2c",
+  acabamento: "#3f8f5f",
+  entrega: "#6b3f7a",
+};
+
+/**
+ * Resolve a cor efetiva de cada etapa para uma pessoa: a personalização dela (`usuario`) tem
+ * prioridade, e cai para o padrão do sistema (`sistema`) em quem ela não mexeu. Isso não inclui
+ * a cor personalizada por serviço individual (campo `cor` em `Tarefa`), que continua sendo
+ * decidida à parte (tem prioridade máxima quando definida).
+ */
+export function coresFasesEfetivas(
+  sistema: Record<Fase, string>,
+  usuario?: Partial<Record<Fase, string>> | undefined,
+): Record<Fase, string> {
+  return { ...sistema, ...usuario };
+}
+
+/** Uma das cores gerais da tela que a pessoa pode personalizar (fora das cores das etapas, que já têm sua própria personalização em `coresFases`). */
+export type ChaveCorTema =
+  "primary" | "background" | "foreground" | "card" | "sidebar" | "accent" | "border";
+
+/** Personalização das cores gerais da tela — mapa parcial: só as cores que a pessoa mexeu. */
+export type CoresTema = Partial<Record<ChaveCorTema, string>>;
+
+/** Linha de swatches mostrada em Configurações → Perfil, com a cor padrão de cada uma para referência. */
+export const CORES_TEMA_TOKENS: { chave: ChaveCorTema; nome: string; padrao: string }[] = [
+  { chave: "primary", nome: "Cor principal", padrao: "#853f17" },
+  { chave: "background", nome: "Fundo da tela", padrao: "#f9f3e7" },
+  { chave: "foreground", nome: "Texto", padrao: "#2d1c12" },
+  { chave: "card", nome: "Cartões e painéis", padrao: "#fefbf4" },
+  { chave: "sidebar", nome: "Menu lateral", padrao: "#f1e6d6" },
+  { chave: "accent", nome: "Destaque", padrao: "#f2a954" },
+  { chave: "border", nome: "Bordas e contornos", padrao: "#ded2c0" },
+];
+
+/** Todas as variáveis CSS que a personalização de tema chega a tocar — usada para limpar tudo de uma vez. */
+const PROPRIEDADES_CSS_TEMA = [
+  "--primary",
+  "--primary-foreground",
+  "--ring",
+  "--sidebar-ring",
+  "--background",
+  "--foreground",
+  "--card-foreground",
+  "--popover-foreground",
+  "--sidebar-foreground",
+  "--card",
+  "--popover",
+  "--sidebar",
+  "--accent",
+  "--accent-foreground",
+  "--border",
+  "--input",
+  "--sidebar-border",
+] as const;
+
+/**
+ * Converte a personalização da pessoa nas variáveis CSS reais que cada cor controla. Cada cor
+ * escolhida também define automaticamente sua cor de texto/contraste (via `corContraste`), para
+ * nunca dar em texto ilegível — a pessoa só escolhe o fundo, não o par.
+ */
+function propriedadesCssDeCoresTema(cores: CoresTema): Partial<Record<string, string>> {
+  const props: Partial<Record<string, string>> = {};
+  if (cores.primary) {
+    props["--primary"] = cores.primary;
+    props["--primary-foreground"] = corContraste(cores.primary);
+    props["--ring"] = cores.primary;
+    props["--sidebar-ring"] = cores.primary;
+  }
+  if (cores.background) props["--background"] = cores.background;
+  if (cores.foreground) {
+    props["--foreground"] = cores.foreground;
+    props["--card-foreground"] = cores.foreground;
+    props["--popover-foreground"] = cores.foreground;
+    props["--sidebar-foreground"] = cores.foreground;
+  }
+  if (cores.card) {
+    props["--card"] = cores.card;
+    props["--popover"] = cores.card;
+  }
+  if (cores.sidebar) props["--sidebar"] = cores.sidebar;
+  if (cores.accent) {
+    props["--accent"] = cores.accent;
+    props["--accent-foreground"] = corContraste(cores.accent);
+  }
+  if (cores.border) {
+    props["--border"] = cores.border;
+    props["--input"] = cores.border;
+    props["--sidebar-border"] = cores.border;
+  }
+  return props;
+}
+
+/** Remove toda personalização de cor de tema do elemento, voltando ao visual padrão (claro ou escuro). */
+export function limparPropriedadesCssTema(raiz: HTMLElement): void {
+  for (const p of PROPRIEDADES_CSS_TEMA) raiz.style.removeProperty(p);
+}
+
+/**
+ * Aplica a personalização de cores da pessoa no elemento (normalmente `document.documentElement`).
+ * Chame só quando o tema efetivo for claro — o tema escuro nunca deve ser tocado por isto.
+ */
+export function aplicarPropriedadesCssTema(raiz: HTMLElement, cores: CoresTema): void {
+  limparPropriedadesCssTema(raiz);
+  for (const [chave, valor] of Object.entries(propriedadesCssDeCoresTema(cores))) {
+    if (valor) raiz.style.setProperty(chave, valor);
+  }
+}
+
 /** Ajustes gerais do sistema, editáveis em Configurações → Sistema. */
 export type ConfiguracoesSistema = {
   nomeEmpresa: string;
+  /** Cor padrão de cada etapa para todo mundo que não personalizou a própria (veja `Usuario.coresFases`). */
+  coresFases: Record<Fase, string>;
 };
 
 /** Valor exibido enquanto os dados reais ainda não chegaram do Supabase. */
 export const configuracoesSistemaIniciais: ConfiguracoesSistema = {
   nomeEmpresa: "Carregando…",
+  coresFases: CORES_FASES_PADRAO,
 };
 
 const semana = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];

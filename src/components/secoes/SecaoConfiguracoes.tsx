@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Building2, Download, KeyRound, Mail, Moon, ShieldCheck, Sun } from "lucide-react";
 
@@ -6,7 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Tema } from "@/lib/gantt-data";
+import {
+  coresFasesEfetivas,
+  CORES_TEMA_TOKENS,
+  faseLabel,
+  paletaCores,
+  type CoresTema,
+  type Fase,
+  type Tema,
+} from "@/lib/gantt-data";
 import { useGantt } from "@/lib/gantt-store";
 
 const OPCOES_TEMA: { valor: Tema; label: string; icone: typeof Sun }[] = [
@@ -15,14 +23,101 @@ const OPCOES_TEMA: { valor: Tema; label: string; icone: typeof Sun }[] = [
   { valor: "sistema", label: "Sistema", icone: ShieldCheck },
 ];
 
+const FASES = Object.keys(faseLabel) as Fase[];
+
+/** Paleta de swatches + cor personalizada, igual à usada na edição rápida de serviço. */
+function SeletorCor({ valor, onChange }: { valor: string; onChange: (cor: string) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {paletaCores.map((c) => (
+        <button
+          key={c.valor}
+          type="button"
+          onClick={() => onChange(c.valor)}
+          title={c.nome}
+          aria-label={`Cor ${c.nome}`}
+          aria-pressed={valor === c.valor}
+          style={{ backgroundColor: c.valor }}
+          className={`size-6 shrink-0 rounded-full border-2 transition-transform hover:scale-110 ${
+            valor === c.valor ? "border-foreground" : "border-transparent"
+          }`}
+        />
+      ))}
+      <label
+        title="Cor personalizada"
+        style={{ backgroundColor: valor }}
+        className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-input"
+      >
+        <input
+          type="color"
+          value={valor}
+          onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 size-full cursor-pointer opacity-0"
+          aria-label="Escolher cor personalizada"
+        />
+      </label>
+    </div>
+  );
+}
+
 function AbaPerfil() {
-  const { usuarioLogado, atualizarNomeProprio, atualizarSenhaPropria, tema, definirTema } =
-    useGantt();
+  const {
+    usuarioLogado,
+    atualizarNomeProprio,
+    atualizarSenhaPropria,
+    tema,
+    definirTema,
+    configuracoesSistema,
+    atualizarMinhasCoresFases,
+    atualizarMinhasCoresTema,
+  } = useGantt();
   const [nome, setNome] = useState(usuarioLogado?.nome ?? "");
   const [novaSenha, setNovaSenha] = useState("");
   const [salvando, setSalvando] = useState(false);
+  const [coresProprias, setCoresProprias] = useState<Partial<Record<Fase, string>>>(
+    usuarioLogado?.coresFases ?? {},
+  );
+  const [salvandoCores, setSalvandoCores] = useState(false);
+  const [coresTemaProprias, setCoresTemaProprias] = useState<CoresTema>(
+    usuarioLogado?.coresTema ?? {},
+  );
+  const [salvandoCoresTema, setSalvandoCoresTema] = useState(false);
+
+  useEffect(() => {
+    setCoresProprias(usuarioLogado?.coresFases ?? {});
+  }, [usuarioLogado?.coresFases]);
+
+  useEffect(() => {
+    setCoresTemaProprias(usuarioLogado?.coresTema ?? {});
+  }, [usuarioLogado?.coresTema]);
 
   if (!usuarioLogado) return null;
+
+  const coresEfetivas = coresFasesEfetivas(configuracoesSistema.coresFases, coresProprias);
+
+  const salvarCores = async () => {
+    setSalvandoCores(true);
+    try {
+      await atualizarMinhasCoresFases(coresProprias);
+      toast.success("Suas cores foram salvas.");
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : "Não foi possível salvar suas cores.");
+    } finally {
+      setSalvandoCores(false);
+    }
+  };
+
+  const salvarCoresTema = async () => {
+    setSalvandoCoresTema(true);
+    try {
+      await atualizarMinhasCoresTema(coresTemaProprias);
+      toast.success("Suas cores da tela foram salvas.");
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : "Não foi possível salvar as cores.");
+    } finally {
+      setSalvandoCoresTema(false);
+    }
+  };
 
   const salvar = async () => {
     if (!nome.trim()) {
@@ -97,6 +192,94 @@ function AbaPerfil() {
           "Sistema" segue o tema claro/escuro configurado no seu navegador ou computador.
         </p>
       </div>
+
+      <div className="rounded-lg border border-border bg-card p-4">
+        <Label className="mb-1 block">Cores da tela</Label>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Personalize o visual do app do jeito que você quiser — escolha uma cor da paleta ou uma
+          cor totalmente personalizada para cada parte da tela abaixo. Vale só para você (ninguém
+          mais vê essas cores) e só para o tema claro: o tema escuro continua sempre com as cores
+          padrão.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          {CORES_TEMA_TOKENS.map((t) => (
+            <div key={t.chave} className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">{t.nome}</span>
+                {coresTemaProprias[t.chave] && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 px-1.5 text-[11px]"
+                    onClick={() =>
+                      setCoresTemaProprias((c) => {
+                        const proxima = { ...c };
+                        delete proxima[t.chave];
+                        return proxima;
+                      })
+                    }
+                  >
+                    Usar padrão
+                  </Button>
+                )}
+              </div>
+              <SeletorCor
+                valor={coresTemaProprias[t.chave] ?? t.padrao}
+                onChange={(cor) => setCoresTemaProprias((c) => ({ ...c, [t.chave]: cor }))}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Button onClick={() => void salvarCoresTema()} disabled={salvandoCoresTema}>
+            {salvandoCoresTema ? "Salvando…" : "Salvar cores da tela"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4">
+        <Label className="mb-1 block">Minhas cores das etapas</Label>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Personalize como cada etapa aparece só para você no cronograma. Quem não mexer aqui usa a
+          cor padrão do sistema (definida em Configurações → Sistema).
+        </p>
+        <div className="space-y-2.5">
+          {FASES.map((f) => (
+            <div key={f} className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm">{faseLabel[f]}</span>
+              <div className="flex items-center gap-2">
+                <SeletorCor
+                  valor={coresEfetivas[f]}
+                  onChange={(cor) => setCoresProprias((c) => ({ ...c, [f]: cor }))}
+                />
+                {coresProprias[f] && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() =>
+                      setCoresProprias((c) => {
+                        const proxima = { ...c };
+                        delete proxima[f];
+                        return proxima;
+                      })
+                    }
+                  >
+                    Usar padrão
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Button onClick={() => void salvarCores()} disabled={salvandoCores}>
+            {salvandoCores ? "Salvando…" : "Salvar minhas cores"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -105,6 +288,12 @@ function AbaSistema() {
   const { configuracoesSistema, atualizarConfiguracoesSistema, exportarBackup } = useGantt();
   const [nomeEmpresa, setNomeEmpresa] = useState(configuracoesSistema.nomeEmpresa);
   const [salvando, setSalvando] = useState(false);
+  const [cores, setCores] = useState<Record<Fase, string>>(configuracoesSistema.coresFases);
+  const [salvandoCores, setSalvandoCores] = useState(false);
+
+  useEffect(() => {
+    setCores(configuracoesSistema.coresFases);
+  }, [configuracoesSistema.coresFases]);
 
   const salvarNomeEmpresa = async () => {
     if (!nomeEmpresa.trim()) {
@@ -119,6 +308,18 @@ function AbaSistema() {
       toast.error(erro instanceof Error ? erro.message : "Não foi possível salvar.");
     } finally {
       setSalvando(false);
+    }
+  };
+
+  const salvarCores = async () => {
+    setSalvandoCores(true);
+    try {
+      await atualizarConfiguracoesSistema({ coresFases: cores });
+      toast.success("Cores das etapas atualizadas para todo mundo.");
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : "Não foi possível salvar as cores.");
+    } finally {
+      setSalvandoCores(false);
     }
   };
 
@@ -162,6 +363,30 @@ function AbaSistema() {
         A criação e gestão de usuários do sistema (e-mail, senha e cargo) agora fica na página
         Equipe, aba "Usuários do sistema".
       </p>
+
+      <div className="rounded-lg border border-border bg-card p-4">
+        <Label className="mb-1 block">Cores das etapas</Label>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Cor padrão de cada etapa no cronograma, para todo mundo que não personalizar a própria em
+          Configurações → Perfil.
+        </p>
+        <div className="space-y-2.5">
+          {FASES.map((f) => (
+            <div key={f} className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm">{faseLabel[f]}</span>
+              <SeletorCor
+                valor={cores[f]}
+                onChange={(cor) => setCores((c) => ({ ...c, [f]: cor }))}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Button onClick={() => void salvarCores()} disabled={salvandoCores}>
+            {salvandoCores ? "Salvando…" : "Salvar cores"}
+          </Button>
+        </div>
+      </div>
 
       <div className="rounded-lg border border-border bg-card p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">

@@ -15,10 +15,16 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  cpfValido,
+  ehEmailDeCpf,
+  emailDoCpf,
+  extrairCpfDoEmail,
+  formatarCpf,
   nomeFuncao,
   papeisAtribuiveis,
   papelLabel,
   podeGerenciarPapel,
+  somenteDigitos,
   SEM_FUNCAO_ID,
   type Papel,
   type Usuario,
@@ -44,6 +50,7 @@ export function SecaoEquipe() {
     usuarioLogado,
     salvarUsuario,
     removerUsuario,
+    alternarStatusUsuario,
   } = useGantt();
   const { avisarComDesfazer } = useDesfazerToast();
 
@@ -51,12 +58,15 @@ export function SecaoEquipe() {
     usuarioLogado?.papel === "admin" || usuarioLogado?.papel === "gerente";
   const cargosAtribuiveis = usuarioLogado ? papeisAtribuiveis(usuarioLogado.papel) : [];
   const admins = usuarios.filter((u) => u.papel === "admin").length;
+  const adminsAtivos = usuarios.filter((u) => u.papel === "admin" && u.ativo !== false).length;
 
   // formulário de colaborador
   const [colabId, setColabId] = useState<string | undefined>();
   const [nome, setNome] = useState("");
   const [funcaoId, setFuncaoId] = useState(SEM_FUNCAO_ID);
+  const [cpfCampo, setCpfCampo] = useState("");
   const [novaFuncaoRapida, setNovaFuncaoRapida] = useState("");
+  const [salvandoColab, setSalvandoColab] = useState(false);
 
   // formulário de função
   const [funcaoEditId, setFuncaoEditId] = useState<string | undefined>();
@@ -66,6 +76,7 @@ export function SecaoEquipe() {
     setColabId(undefined);
     setNome("");
     setFuncaoId(SEM_FUNCAO_ID);
+    setCpfCampo("");
     setNovaFuncaoRapida("");
   };
 
@@ -80,6 +91,7 @@ export function SecaoEquipe() {
     setColabId(c.id);
     setNome(c.nome);
     setFuncaoId(c.funcaoId);
+    setCpfCampo(c.cpf ? formatarCpf(c.cpf) : "");
   };
 
   const editarFuncao = (id: string) => {
@@ -94,8 +106,57 @@ export function SecaoEquipe() {
       toast.error("Digite o nome do funcionário.");
       return;
     }
+    const cpfDigitos = somenteDigitos(cpfCampo);
+    if (cpfDigitos && !cpfValido(cpfDigitos)) {
+      toast.error("CPF inválido. Confira os números digitados.");
+      return;
+    }
+    setSalvandoColab(true);
     try {
-      await salvarColaborador({ id: colabId, nome: nome.trim(), funcaoId });
+      const id = await salvarColaborador({
+        id: colabId,
+        nome: nome.trim(),
+        funcaoId,
+        ...(cpfDigitos ? { cpf: cpfDigitos } : {}),
+      });
+
+      // CPF cadastrado → cria (ou mantém em dia) automaticamente o login desse
+      // funcionário, usando o CPF como e-mail interno e como senha inicial.
+      if (cpfDigitos) {
+        const emailCpf = emailDoCpf(cpfDigitos);
+        const contaExistente = usuarios.find((u) => u.colaboradorId === id);
+        try {
+          if (contaExistente) {
+            if (contaExistente.email !== emailCpf) {
+              await salvarUsuario({
+                id: contaExistente.id,
+                nome: contaExistente.nome,
+                papel: contaExistente.papel,
+                colaboradorId: id,
+                verTodosNaAgenda: contaExistente.verTodosNaAgenda,
+                novoEmail: emailCpf,
+              });
+            }
+          } else {
+            await salvarUsuario({
+              nome: nome.trim(),
+              email: emailCpf,
+              senha: cpfDigitos,
+              papel: "usuario",
+              colaboradorId: id,
+              verTodosNaAgenda: false,
+            });
+          }
+        } catch (erroLogin) {
+          toast.error(
+            mensagemErro(
+              erroLogin,
+              "Funcionário salvo, mas não foi possível criar/atualizar o login dele.",
+            ),
+          );
+        }
+      }
+
       avisarComDesfazer(
         colabId
           ? `Funcionário "${nome.trim()}" atualizado.`
@@ -104,6 +165,8 @@ export function SecaoEquipe() {
       limparColab();
     } catch (erro) {
       toast.error(mensagemErro(erro, "Não foi possível salvar o funcionário."));
+    } finally {
+      setSalvandoColab(false);
     }
   };
 
@@ -163,7 +226,8 @@ export function SecaoEquipe() {
   const editarUsuario = (u: Usuario) => {
     setUsuarioId(u.id);
     setUNome(u.nome);
-    setUEmail(u.email);
+    const cpfDoLogin = extrairCpfDoEmail(u.email);
+    setUEmail(cpfDoLogin ? `CPF: ${formatarCpf(cpfDoLogin)}` : u.email);
     setUSenha("");
     setUPapel(u.papel);
     setUColaboradorId(u.colaboradorId ?? SEM_VINCULO);
@@ -248,6 +312,20 @@ export function SecaoEquipe() {
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="colab-cpf">CPF (opcional)</Label>
+            <Input
+              id="colab-cpf"
+              value={cpfCampo}
+              onChange={(e) => setCpfCampo(e.target.value)}
+              placeholder="000.000.000-00"
+              inputMode="numeric"
+            />
+            <p className="text-xs text-muted-foreground">
+              Ao informar o CPF, um login de acesso é criado (ou atualizado) automaticamente para
+              esse funcionário — CPF como usuário e como senha inicial.
+            </p>
+          </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="nova-funcao-rapida" className="text-xs text-muted-foreground">
               Não achou a função? Cadastre uma nova sem sair daqui:
@@ -272,9 +350,13 @@ export function SecaoEquipe() {
             </div>
           </div>
           <div className="flex gap-2 sm:col-span-2">
-            <Button onClick={() => void submeterColab()}>
+            <Button onClick={() => void submeterColab()} disabled={salvandoColab}>
               <Plus className="mr-2 size-4" />
-              {colabId ? "Salvar alterações" : "Adicionar funcionário"}
+              {salvandoColab
+                ? "Salvando…"
+                : colabId
+                  ? "Salvar alterações"
+                  : "Adicionar funcionário"}
             </Button>
             {colabId && (
               <Button variant="ghost" onClick={limparColab}>
@@ -291,6 +373,7 @@ export function SecaoEquipe() {
                 <p className="truncate text-sm font-semibold">{c.nome}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   {nomeFuncao(funcoes, c.funcaoId)}
+                  {c.cpf && ` · CPF: ${formatarCpf(c.cpf)}`}
                 </p>
               </div>
               <Button variant="ghost" size="icon" onClick={() => editarColab(c.id)}>
@@ -487,23 +570,64 @@ export function SecaoEquipe() {
               const podeGerenciarEsse =
                 !!usuarioLogado && podeGerenciarPapel(usuarioLogado.papel, u.papel);
               const vinculado = colaboradores.find((c) => c.id === u.colaboradorId);
+              const ativo = u.ativo !== false;
+              const identificador = ehEmailDeCpf(u.email)
+                ? `CPF: ${formatarCpf(extrairCpfDoEmail(u.email) ?? "")}`
+                : u.email;
+              const eEuMesmo = u.id === usuarioLogado?.id;
+              const travarToggleAtivo =
+                eEuMesmo ||
+                !podeGerenciarEsse ||
+                (u.papel === "admin" && ativo && adminsAtivos <= 1);
               return (
                 <li key={u.id} className="flex items-center gap-2 p-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">
                       {u.nome}
-                      {u.id === usuarioLogado?.id && (
+                      {eEuMesmo && (
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
                           (você)
                         </span>
                       )}
+                      {!ativo && (
+                        <span className="ml-2 text-xs font-normal text-destructive">
+                          Desativado
+                        </span>
+                      )}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {u.email} · {papelLabel[u.papel]}
+                      {identificador} · {papelLabel[u.papel]}
                       {u.papel === "usuario" &&
                         (vinculado ? ` · Vinculado a ${vinculado.nome}` : " · Sem vínculo")}
                       {u.papel === "usuario" && u.verTodosNaAgenda && " · Vê a agenda de todos"}
                     </p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Switch
+                      checked={ativo}
+                      disabled={travarToggleAtivo}
+                      onCheckedChange={(checked) => {
+                        void alternarStatusUsuario(u.id, checked)
+                          .then(() =>
+                            avisarComDesfazer(
+                              checked
+                                ? `Usuário "${u.nome}" reativado.`
+                                : `Usuário "${u.nome}" desativado.`,
+                            ),
+                          )
+                          .catch((erro: unknown) =>
+                            toast.error(
+                              mensagemErro(
+                                erro,
+                                "Não foi possível alterar o status desse usuário.",
+                              ),
+                            ),
+                          );
+                      }}
+                    />
+                    <span className="sr-only">
+                      {ativo ? `Desativar acesso de ${u.nome}` : `Reativar acesso de ${u.nome}`}
+                    </span>
                   </div>
                   <Button
                     variant="ghost"

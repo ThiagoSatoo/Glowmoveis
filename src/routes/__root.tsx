@@ -1,3 +1,4 @@
+import { type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -7,9 +8,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import type { ReactNode } from "react";
 
 import appCss from "../styles.css?url";
+import { AtualizacaoObrigatoria } from "@/components/AtualizacaoObrigatoria";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -80,6 +81,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "Gantt de produção para marcenaria" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "theme-color", content: "#853f17" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+      { name: "apple-mobile-web-app-title", content: "Cronograma" },
     ],
     links: [
       {
@@ -93,6 +99,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;500;600;700&display=swap",
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
+      { rel: "manifest", href: "/manifest.webmanifest" },
     ],
   }),
   shellComponent: RootShell,
@@ -103,15 +111,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 const SCRIPT_TEMA_INICIAL = `(function () {
   try {
-    var bruto = localStorage.getItem("marcenaria:estado:v1");
-    var tema = "sistema";
-    if (bruto) {
-      var dados = JSON.parse(bruto);
-      if (dados && typeof dados.tema === "string") tema = dados.tema;
-    }
+    var tema = localStorage.getItem("marcenaria:tema") || "sistema";
     var escuro =
       tema === "escuro" ||
-      (tema === "sistema" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      (tema !== "claro" && window.matchMedia("(prefers-color-scheme: dark)").matches);
     if (escuro) document.documentElement.classList.add("dark");
   } catch (e) {}
 })();`;
@@ -140,6 +143,9 @@ function RootComponent() {
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster richColors position="bottom-center" />
+      {/* Registra o service worker e, quando detecta uma versão nova, bloqueia o app até a
+          pessoa aceitar atualizar — veja o componente para os detalhes. */}
+      <AtualizacaoObrigatoria />
     </QueryClientProvider>
   );
 }

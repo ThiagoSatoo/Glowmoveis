@@ -70,6 +70,9 @@ const atualizarUsuarioSchema = z.object({
   colaboradorId: z.string().uuid().optional(),
   verTodosNaAgenda: z.boolean().optional(),
   novaSenha: z.string().min(6).optional(),
+  /** Quando informado, troca o e-mail/login da conta (usado para manter o login em dia
+   * quando o CPF de um colaborador vinculado é editado). */
+  novoEmail: z.string().email().optional(),
 });
 
 export const atualizarUsuarioSv = createServerFn({ method: "POST" })
@@ -97,6 +100,14 @@ export const atualizarUsuarioSv = createServerFn({ method: "POST" })
       }
     }
 
+    if (data.novoEmail) {
+      const { error: emailError } = await admin.auth.admin.updateUserById(data.id, {
+        email: data.novoEmail,
+        email_confirm: true,
+      });
+      if (emailError) throw new Error(emailError.message);
+    }
+
     const { error: updateError } = await admin
       .from("profiles")
       .update({
@@ -104,6 +115,7 @@ export const atualizarUsuarioSv = createServerFn({ method: "POST" })
         papel: data.papel,
         colaborador_id: data.colaboradorId ?? null,
         ver_todos_na_agenda: data.verTodosNaAgenda ?? false,
+        ...(data.novoEmail ? { email: data.novoEmail } : {}),
       })
       .eq("id", data.id);
     if (updateError) throw new Error(updateError.message);
@@ -114,6 +126,63 @@ export const atualizarUsuarioSv = createServerFn({ method: "POST" })
       });
       if (senhaError) throw new Error(senhaError.message);
     }
+    return { ok: true };
+  });
+
+/**
+ * Duração de "banimento" usada para desativar uma conta no Supabase Auth: bloqueia novos
+ * logins/renovações de token quase permanentemente (~100 anos). Um token já emitido continua
+ * válido até expirar sozinho (normalmente ~1h) — por isso a política de RLS `esta_ativo()`
+ * também trava o acesso aos dados de imediato, sem depender só disso.
+ */
+const BANIMENTO_DESATIVADO = "876000h";
+
+const alternarStatusUsuarioSchema = z.object({
+  accessToken: z.string().min(1),
+  id: z.string().uuid(),
+  ativo: z.boolean(),
+});
+
+export const alternarStatusUsuarioSv = createServerFn({ method: "POST" })
+  .validator((data: unknown) => alternarStatusUsuarioSchema.parse(data))
+  .handler(async ({ data }) => {
+    const admin = criarClienteAdmin();
+    const { data: alvoAtual, error: alvoError } = await admin
+      .from("profiles")
+      .select("papel")
+      .eq("id", data.id)
+      .single();
+    if (alvoError || !alvoAtual) throw new Error("Usuário não encontrado.");
+
+    const { atorId } = await autenticarEAutorizar(data.accessToken, alvoAtual.papel as Papel);
+
+    if (!data.ativo) {
+      if (atorId === data.id) {
+        throw new Error("Você não pode desativar sua própria conta.");
+      }
+      if (alvoAtual.papel === "admin") {
+        const { count } = await admin
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .eq("papel", "admin")
+          .eq("ativo", true);
+        if ((count ?? 0) <= 1) {
+          throw new Error("Precisa sobrar pelo menos um administrador ativo no sistema.");
+        }
+      }
+    }
+
+    const { error: updateError } = await admin
+      .from("profiles")
+      .update({ ativo: data.ativo })
+      .eq("id", data.id);
+    if (updateError) throw new Error(updateError.message);
+
+    const { error: banError } = await admin.auth.admin.updateUserById(data.id, {
+      ban_duration: data.ativo ? "none" : BANIMENTO_DESATIVADO,
+    });
+    if (banError) throw new Error(banError.message);
+
     return { ok: true };
   });
 

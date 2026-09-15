@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { AppSidebar, type SecaoId } from "@/components/AppSidebar";
 import { GanttMarcenaria } from "@/components/GanttMarcenaria";
+import { RelogioBoasVindas } from "@/components/RelogioBoasVindas";
 import { SecaoAgenda } from "@/components/secoes/SecaoAgenda";
 import { SecaoClientes } from "@/components/secoes/SecaoClientes";
 import { SecaoConfiguracoes } from "@/components/secoes/SecaoConfiguracoes";
@@ -10,6 +11,7 @@ import { SecaoEquipe } from "@/components/secoes/SecaoEquipe";
 import { SecaoRelatorios } from "@/components/secoes/SecaoRelatorios";
 import { SecaoServicos } from "@/components/secoes/SecaoServicos";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { aplicarPropriedadesCssTema, limparPropriedadesCssTema } from "@/lib/gantt-data";
 import { GanttProvider, useGantt } from "@/lib/gantt-store";
 
 export const Route = createFileRoute("/")({
@@ -77,13 +79,33 @@ function Index() {
 function IndexProtegido() {
   const [secao, setSecao] = useState<SecaoId>("cronograma");
   const { titulo, descricao } = TITULOS[secao];
-  const { usuarioLogadoId, usuarioLogado, sessaoCarregada, carregandoDados, configuracoesSistema } =
-    useGantt();
+  const {
+    usuarioLogadoId,
+    usuarioLogado,
+    sessaoCarregada,
+    carregandoDados,
+    configuracoesSistema,
+    tema,
+  } = useGantt();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (sessaoCarregada && !usuarioLogadoId) void navigate({ to: "/login", replace: true });
   }, [sessaoCarregada, usuarioLogadoId, navigate]);
+
+  // Cores de tela personalizadas por conta (Configurações → Perfil). Só se aplicam no tema
+  // claro — o tema escuro nunca muda por causa disso, então primeiro checa a classe real do
+  // <html> (já sincronizada por `aplicarTema`/`definirTema`) em vez de assumir pelo valor salvo.
+  useEffect(() => {
+    const raiz = document.documentElement;
+    const escuro = raiz.classList.contains("dark");
+    if (!escuro && usuarioLogado?.coresTema) {
+      aplicarPropriedadesCssTema(raiz, usuarioLogado.coresTema);
+    } else {
+      limparPropriedadesCssTema(raiz);
+    }
+    return () => limparPropriedadesCssTema(raiz);
+  }, [tema, usuarioLogado?.coresTema]);
 
   // O cargo "Usuário" só acompanha o próprio cronograma — evita ficar preso numa seção
   // restrita caso o cargo mude (ou a conta troque) enquanto essa seção está aberta.
@@ -104,6 +126,7 @@ function IndexProtegido() {
 
   return (
     <SidebarProvider>
+      <RelogioBoasVindas nome={usuarioLogado?.nome} />
       <AppSidebar
         secaoAtiva={secao}
         onSelecionarSecao={setSecao}
