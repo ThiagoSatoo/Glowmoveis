@@ -47,14 +47,14 @@ export default defineConfig({
             // static output that Vercel actually serves in .vercel/output/static instead.
             outDir: ".vercel/output/static",
             manifest: {
-              name: "Cronograma da Marcenaria",
-              short_name: "Cronograma",
+              name: "Glow Móveis",
+              short_name: "Glow Móveis",
               description: "Gantt de produção para marcenaria",
               start_url: "/",
               scope: "/",
               display: "standalone",
-              background_color: "#f9f3e7",
-              theme_color: "#853f17",
+              background_color: "#43493f",
+              theme_color: "#43493f",
               icons: [
                 { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
                 { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },

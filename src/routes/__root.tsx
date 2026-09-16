@@ -75,17 +75,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Cronograma da Marcenaria" },
+      { title: "Glow Móveis" },
       { name: "description", content: "Gantt de produção para marcenaria" },
-      { property: "og:title", content: "Cronograma da Marcenaria" },
+      { property: "og:title", content: "Glow Móveis" },
       { property: "og:description", content: "Gantt de produção para marcenaria" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "theme-color", content: "#853f17" },
+      { name: "theme-color", content: "#43493f" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { name: "apple-mobile-web-app-title", content: "Cronograma" },
+      { name: "apple-mobile-web-app-title", content: "Glow Móveis" },
     ],
     links: [
       {
