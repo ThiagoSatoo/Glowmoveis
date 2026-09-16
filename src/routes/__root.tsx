@@ -11,6 +11,7 @@ import {
 
 import appCss from "../styles.css?url";
 import { AtualizacaoObrigatoria } from "@/components/AtualizacaoObrigatoria";
+import { InstalarApp } from "@/components/InstalarApp";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -146,6 +147,8 @@ function RootComponent() {
       {/* Registra o service worker e, quando detecta uma versão nova, bloqueia o app até a
           pessoa aceitar atualizar — veja o componente para os detalhes. */}
       <AtualizacaoObrigatoria />
+      {/* Convite dispensável pra instalar o app na tela inicial — veja o componente para os detalhes. */}
+      <InstalarApp />
     </QueryClientProvider>
   );
 }
